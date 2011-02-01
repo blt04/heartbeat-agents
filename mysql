@@ -76,6 +76,7 @@ OCF_RESKEY_additional_parameters_default=""
 OCF_RESKEY_replication_port_default="3306"
 OCF_RESKEY_max_slave_lag_default="3600"
 OCF_RESKEY_evict_outdated_slaves_default="false"
+OCF_RESKEY_ignore_if_default="/etc/ha.d/ignore-mysql"
 
 : ${OCF_RESKEY_binary=${OCF_RESKEY_binary_default}}
 MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
@@ -105,6 +106,7 @@ MYSQL_BINDIR=`dirname ${OCF_RESKEY_binary}`
 
 : ${OCF_RESKEY_max_slave_lag=${OCF_RESKEY_max_slave_lag_default}}
 : ${OCF_RESKEY_evict_outdated_slaves=${OCF_RESKEY_evict_outdated_slaves_default}}
+: ${OCF_RESKEY_ignore_if=${OCF_RESKEY_ignore_if_default}}
 
 #######################################################################
 
@@ -308,6 +310,14 @@ slaves</shortdesc>
 <content type="boolean" default="${OCF_RESKEY_evict_outdated_slaves_default}" />
 </parameter>
 
+<parameter name="ignore_if" unique="0" required="0">
+<longdesc lang="en">
+If this file exists, MySQL validation will be skipped and monitor requests will
+always return "not running".
+</longdesc>
+<shortdesc lang="en">Determines whether mysql status should be ignored</shortdesc>
+<content type="string" default="${OCF_RESKEY_ignore_if}" />
+</parameter>
 </parameters>
 
 <actions>
@@ -556,6 +566,10 @@ unset_master(){
 # Functions invoked by resource manager actions
 
 mysql_validate() {
+    if [ -f $OCF_RESKEY_ignore_if ]; then
+        return $OCF_NOT_RUNNING;
+    fi
+
     check_binary $OCF_RESKEY_binary
     check_binary  $OCF_RESKEY_client_binary
 
@@ -608,8 +622,14 @@ mysql_status() {
 
 mysql_monitor() {
     local rc
-    mysql_status
-    rc=$?
+
+    if [ -f $OCF_RESKEY_ignore_if ]; then
+        ocf_log debug "Ignoring MySQL status because file ${OCF_RESKEY_ignore_if} exists"
+        rc=$OCF_NOT_RUNNING
+    else
+        mysql_status
+        rc=$?
+    fi
 
     # If status returned an error, return that immediately
     if [ $rc -ne $OCF_SUCCESS ]; then
