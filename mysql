@@ -785,16 +785,34 @@ mysql_start() {
 
         else
             if is_slave; then
-                ocf_log info "No MySQL master present, resuming last know slave replication"
+                ocf_log info "No MySQL master present, resuming last known slave replication"
                 ocf_run $MYSQL $MYSQL_OPTIONS_LOCAL $MYSQL_OPTIONS_REPL \
                     -e 'START SLAVE'
                 if [ $? -ne 0 ]; then
                     ocf_log err "Failed to start slave"
                     return $OCF_ERR_GENERIC
+                else
+                    tmpfile=`mktemp ${HA_RSCTMP}/check_slave.${OCF_RESOURCE_INSTANCE}.XXXXXX`
+                    mysql_options="$MYSQL_OPTIONS_LOCAL $MYSQL_OPTIONS_REPL"
+                    local secs_behind
+                    while true; do
+                        # Allow slave to process previous master events before the master is reset
+                        $MYSQL $mysql_options -e 'SHOW SLAVE STATUS\G' > $tmpfile
+                        secs_behind=`sed -ne 's/^.*Seconds_Behind_Master: \(.*\)$/\1/p' < $tmpfile`
+                        if [ $secs_behind = 'NULL' ]; then
+                            ocf_log warn "Cannot resume last known MySQL slave replication"
+                            break
+                        elif [ $secs_behind -gt 0 ]; then
+                            sleep 1
+                        else
+                            ocf_log info "Previous MySQL slave replication caught up"
+                            break
+                        fi
+                    done
                 fi
-            else
-                ocf_log info "No MySQL master present, clearing replication state"
                 unset_master
+            else
+                ocf_log info "No MySQL master present"
                 master_pref=3
             fi
         fi
